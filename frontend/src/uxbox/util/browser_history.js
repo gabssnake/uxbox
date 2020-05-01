@@ -42,4 +42,8 @@ goog.scope(function() {
   self.set_token_BANG_ = function(instance, token) {
     instance.setToken(token);
   }
+
+  self.replace_token_BANG_ = function(instance, token) {
+    instance.replaceToken(token);
+  }
 });
