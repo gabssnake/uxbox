@@ -222,7 +222,6 @@
                (st/emit! ::finish-positioning #_(dw/stop-viewport-positioning)))
              (st/emit! (ms/->KeyboardEvent :up key ctrl? shift?)))))
 
-
         posx  (mf/use-state 0)
         posy  (mf/use-state 0)
 
@@ -250,7 +249,12 @@
             (st/emit! (ms/->PointerEvent :viewport pt
                                          (kbd/ctrl? event)
                                          (kbd/shift? event)))))
-
+        on-resize
+        (fn [event]
+          (let [node (mf/ref-val viewport-ref)
+                parent (.-parentElement ^js node)]
+            (reset! width (.-clientWidth ^js parent))
+            (reset! height (.-clientHeight ^js parent))))
 
         on-mouse-wheel
         (mf/use-callback
@@ -258,37 +262,17 @@
            (dom/prevent-default event)
            (dom/stop-propagation event)
 
+           (if (kbd/ctrl? event)
+             (let [event (.getBrowserEvent event)]
+               (if (pos? (.-deltaY event))
+                 (st/emit! dw/decrease-zoom)
+                 (st/emit! dw/increase-zoom)))
            (let [event (.getBrowserEvent event)
                  delta (.-deltaY ^js event)]
              (js/console.log "on-mouse-wheel" event)
              (if (kbd/shift? event)
                (swap! posx + delta)
-               (swap! posy + delta)))
-
-           #_(when (kbd/ctrl? event)
-             ;; Disable browser zoom with ctrl+mouse wheel
-             (dom/prevent-default event)
-             (let [event (.getBrowserEvent event)]
-               (if (pos? (.-deltaY event))
-                 (st/emit! dw/decrease-zoom)
-                 (st/emit! dw/increase-zoom))))))
-
-        on-mount
-        (fn []
-          (let [key1 (events/listen js/document EventType.KEYDOWN on-key-down)
-                key2 (events/listen js/document EventType.KEYUP on-key-up)
-                dnode (mf/ref-val viewport-ref)
-                key3 (events/listen dnode EventType.MOUSEMOVE on-mouse-move)
-                ;; bind with passive=false to allow the event to be cancelled
-                ;; https://stackoverflow.com/a/57582286/3219895
-                key4 (events/listen js/window EventType.WHEEL on-mouse-wheel
-                                    #js {"passive" false})]
-            (fn []
-              (events/unlistenByKey key1)
-              (events/unlistenByKey key2)
-              (events/unlistenByKey key3)
-              (events/unlistenByKey key4)
-              )))
+               (swap! posy + delta))))))
 
         on-drag-over
         ;; Should prevent only events that we'll handle on-drop
@@ -303,14 +287,36 @@
                 final-y (- (:y viewport-coord) (/ (:height shape) 2))]
             (st/emit! (dw/add-shape (-> shape
                                         (assoc :x final-x)
-                                        (assoc :y final-y))))))]
+                                        (assoc :y final-y))))))
+        on-mount
+        (fn []
+          (let [node (mf/ref-val viewport-ref)
+
+                key1 (events/listen js/document EventType.KEYDOWN on-key-down)
+                key2 (events/listen js/document EventType.KEYUP on-key-up)
+                key3 (events/listen node EventType.MOUSEMOVE on-mouse-move)
+                ;; bind with passive=false to allow the event to be cancelled
+                ;; https://stackoverflow.com/a/57582286/3219895
+                key4 (events/listen js/window EventType.WHEEL on-mouse-wheel
+                                    #js {"passive" false})
+                key5 (events/listen js/window EventType.RESIZE on-resize)]
+            (on-resize nil)
+            (fn []
+              (events/unlistenByKey key1)
+              (events/unlistenByKey key2)
+              (events/unlistenByKey key3)
+              (events/unlistenByKey key4)
+              (events/unlistenByKey key5)
+              )))
+
+        ]
 
     (mf/use-effect on-mount)
     [:*
      [:& coordinates {:zoom zoom}]
      [:svg.viewport {
-                     :width 4000
-                     :height 4000
+                     :width @width
+                     :height @height
                      :view-box (str/join " " [@posx
                                               @posy
                                               (/ @width zoom)
@@ -324,9 +330,8 @@
                      :on-mouse-up on-mouse-up
                      :on-drag-over on-drag-over
                      :on-drop on-drop}
+      [:g.zoom
 
-      [:g.zoom #_{:transform (str "scale(" zoom ", " zoom ")")}
-       ;; [:& perf/profiler {:label "viewport-frames"}
        [:& frames {:key (:id page)}]
 
        (when (seq selected)
@@ -342,7 +347,7 @@
 
        [:& snap-feedback]
 
-       (if (contains? flags :grid)
+       (when (contains? flags :grid)
          [:& grid])]
 
       (when tooltip
@@ -353,3 +358,4 @@
 
       [:& presence/active-cursors {:page page}]
       [:& selection-rect {:data (:selrect local)}]]]))
+
