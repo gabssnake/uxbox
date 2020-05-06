@@ -328,8 +328,8 @@
               {:type :rect
                :x start-x
                :y start-y
-               :width (- (mth/abs end-x) (mth/abs start-x))
-               :height (- (mth/abs end-y) (mth/abs start-y))}))]
+               :width (mth/abs (- end-x start-x))
+               :height (mth/abs (- end-y start-y))}))]
     (ptk/reify ::handle-selection
       ptk/WatchEvent
       (watch [_ state stream]
