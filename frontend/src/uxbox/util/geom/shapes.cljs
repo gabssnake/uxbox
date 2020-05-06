@@ -116,8 +116,8 @@
   [{:keys [segments x1 y1 x2 y2] :as shape}]
   (if (and x1 y1 x2 y2)
     (assoc shape
-           :width (- (mth/abs x2) (mth/abs x1))
-           :height (- (mth/abs y2) (mth/abs y1)))
+           :width (- x2 x1)
+           :height (- y2 y1))
     (let [minx (apply min (map :x segments))
           miny (apply min (map :y segments))
           maxx (apply max (map :x segments))
