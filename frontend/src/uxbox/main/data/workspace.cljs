@@ -328,17 +328,21 @@
               {:type :rect
                :x start-x
                :y start-y
-               :width (- end-x start-x)
-               :height (- end-y start-y)}))]
+               :width (- (mth/abs end-x) (mth/abs start-x))
+               :height (- (mth/abs end-y) (mth/abs start-y))}))]
     (ptk/reify ::handle-selection
       ptk/WatchEvent
       (watch [_ state stream]
         (let [stoper (rx/filter #(or (interrupt? %)
                                      (ms/mouse-up? %))
-                                stream)]
+                                stream)
+              zoom (get-in state [:workspace-local :zoom])
+              zoom (gpt/point zoom zoom)]
           (rx/concat
            (rx/of deselect-all)
            (->> ms/mouse-position
+                (rx/map (fn [point]
+                          (gpt/divide point zoom)))
                 (rx/scan (fn [data pos]
                            (if data
                              (assoc data :stop pos)

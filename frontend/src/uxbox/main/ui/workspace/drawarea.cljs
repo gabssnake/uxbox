@@ -132,7 +132,10 @@
                   point-snap (snap/closest-snap-point snap-data [shape] point)
                   deltav (gpt/to-vec initial point-snap)
                   scalev (gpt/divide (gpt/add shapev deltav) shapev)
-                  scalev (if lock? (let [v (max (:x scalev) (:y scalev))] (gpt/point v v)) scalev)]
+                  scalev (if lock?
+                           (let [v (max (:x scalev) (:y scalev))]
+                             (gpt/point v v))
+                           scalev)]
               (-> shape
                   (assoc-in [:modifiers :resize-vector] scalev)
                   (assoc-in [:modifiers :resize-origin] (gpt/point x y))

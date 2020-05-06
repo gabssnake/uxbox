@@ -9,9 +9,9 @@
 
 (ns uxbox.main.ui.workspace.viewport
   (:require
+   [cuerdas.core :as str]
    [beicon.core :as rx]
    [goog.events :as events]
-   [lentes.core :as l]
    [potok.core :as ptk]
    [rumext.alpha :as mf]
    [uxbox.main.ui.icons :as i]
@@ -30,6 +30,7 @@
    [uxbox.main.ui.workspace.selection :refer [selection-handlers]]
    [uxbox.main.ui.workspace.presence :as presence]
    [uxbox.main.ui.workspace.snap-feedback :refer [snap-feedback]]
+   [uxbox.util.math :as mth]
    [uxbox.util.dom :as dom]
    [uxbox.util.geom.point :as gpt]
    [uxbox.util.perf :as perf]
@@ -124,7 +125,6 @@
                             :objects objects}]
          [:& shape-wrapper {:shape item
                             :key (:id item)}]))]))
-
 
 (mf/defc viewport
   [{:keys [page] :as props}]
@@ -223,13 +223,25 @@
                (st/emit! ::finish-positioning #_(dw/stop-viewport-positioning)))
              (st/emit! (ms/->KeyboardEvent :up key ctrl? shift?)))))
 
+
+        posx  (mf/use-state 0)
+        posy  (mf/use-state 0)
+
+        width (mf/use-state c/viewport-width)
+        height (mf/use-state c/viewport-height)
+
         translate-point-to-viewport
         (fn [pt]
           (let [viewport (mf/ref-val viewport-ref)
+                vbox  (.. ^js viewport -viewBox -baseVal)
                 brect (.getBoundingClientRect viewport)
                 brect (gpt/point (d/parse-integer (.-left brect))
-                                 (d/parse-integer (.-top brect)))]
-            (gpt/subtract pt brect)))
+                                 (d/parse-integer (.-top brect)))
+                box   (gpt/point (.-x vbox)
+                               (.-y vbox))
+                ]
+            (-> (gpt/subtract pt brect)
+                (gpt/add box))))
 
         on-mouse-move
         (fn [event]
@@ -239,10 +251,21 @@
                                          (kbd/ctrl? event)
                                          (kbd/shift? event)))))
 
+
         on-mouse-wheel
         (mf/use-callback
          (fn [event]
-           (when (kbd/ctrl? event)
+           (dom/prevent-default event)
+           (dom/stop-propagation event)
+
+           (let [event (.getBrowserEvent event)
+                 delta (.-deltaY ^js event)]
+             (js/console.log "on-mouse-wheel" event)
+             (if (kbd/shift? event)
+               (swap! posx + delta)
+               (swap! posy + delta)))
+
+           #_(when (kbd/ctrl? event)
              ;; Disable browser zoom with ctrl+mouse wheel
              (dom/prevent-default event)
              (let [event (.getBrowserEvent event)]
@@ -285,8 +308,13 @@
     (mf/use-effect on-mount)
     [:*
      [:& coordinates {:zoom zoom}]
-     [:svg.viewport {:width (* c/viewport-width zoom)
-                     :height (* c/viewport-height zoom)
+     [:svg.viewport {
+                     :width 4000
+                     :height 4000
+                     :view-box (str/join " " [@posx
+                                              @posy
+                                              (/ @width zoom)
+                                              (/ @height zoom)])
                      :ref viewport-ref
                      :class (when drawing-tool "drawing")
                      :on-context-menu on-context-menu
@@ -297,7 +325,7 @@
                      :on-drag-over on-drag-over
                      :on-drop on-drop}
 
-      [:g.zoom {:transform (str "scale(" zoom ", " zoom ")")}
+      [:g.zoom #_{:transform (str "scale(" zoom ", " zoom ")")}
        ;; [:& perf/profiler {:label "viewport-frames"}
        [:& frames {:key (:id page)}]
 
