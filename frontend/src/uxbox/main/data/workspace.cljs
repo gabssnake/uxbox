@@ -72,6 +72,10 @@
 
 (def workspace-default
   {:zoom 1
+   :size {:x 0
+          :y 0
+          :width c/viewport-width
+          :height c/viewport-height}
    :flags #{}
    :selected #{}
    :drawing nil
@@ -188,6 +192,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Workspace State Manipulation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn update-viewport-size
+  [attrs]
+  (ptk/reify ::update-viewport-size
+    ptk/UpdateEvent
+    (update [_ state]
+      (update-in state [:workspace-local :size]
+                 (fn [size]
+                   (reduce-kv (fn [size attr val]
+                                (if (fn? val)
+                                  (update size attr val)
+                                  (assoc size attr val)))
+                              size
+                              attrs))))))
 
 (defn adjust-group-shapes
   [ids]

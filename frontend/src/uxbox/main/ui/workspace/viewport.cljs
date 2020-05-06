@@ -87,22 +87,17 @@
 
 ;; --- Viewport Positioning
 
-(def handle-viewport-positioning
-  (letfn [(on-point [dom reference point]
-            (let [{:keys [x y]} (gpt/subtract point reference)
-                  cx (.-scrollLeft dom)
-                  cy (.-scrollTop dom)]
-              (set! (.-scrollLeft dom) (- cx x))
-              (set! (.-scrollTop dom) (- cy y))))]
-    (ptk/reify ::handle-viewport-positioning
-      ptk/EffectEvent
-      (effect [_ state stream]
-        (let [stoper (rx/filter #(= ::finish-positioning %) stream)
-              reference @ms/mouse-position
-              dom (dom/get-element "workspace-viewport")]
-          (-> (rx/take-until stoper ms/mouse-position)
-              (rx/subscribe #(on-point dom reference %))))))))
-
+(defn- handle-viewport-positioning
+  [viewport-ref]
+  (let [node   (mf/ref-val viewport-ref)
+        stoper (rx/filter #(= ::finish-positioning %) st/stream)
+        stream (rx/take-until stoper ms/mouse-position-delta)]
+    (rx/subscribe stream
+                  (fn [delta]
+                    (let [vbox (.. ^js node -viewBox -baseVal)]
+                      (st/emit! (dw/update-viewport-size
+                                 {:x #(- % (:x delta))
+                                  :y #(- % (:y delta))})))))))
 
 ;; --- Viewport
 
@@ -130,6 +125,7 @@
   (let [{:keys [drawing-tool
                 zoom
                 flags
+                size
                 edition
                 tooltip
                 selected]
@@ -145,16 +141,25 @@
          (mf/deps drawing-tool edition)
          (fn [event]
            (dom/stop-propagation event)
-           (let [ctrl? (kbd/ctrl? event)
+           (let [event (.-nativeEvent event)
+                 ctrl? (kbd/ctrl? event)
                  shift? (kbd/shift? event)
                  opts {:shift? shift?
                        :ctrl? ctrl?}]
              (st/emit! (ms/->MouseEvent :down ctrl? shift?))
-             (when (and (not edition)
-                        (= 1 (.-which (.-nativeEvent event))))
+
+             (cond
+               (and (not edition) (= 1 (.-which event)))
                (if drawing-tool
                  (st/emit! (start-drawing drawing-tool))
-                 (st/emit! dw/handle-selection))))))
+                 (st/emit! dw/handle-selection))
+
+               (and (not edition)
+                    (= 2 (.-which event)))
+               (handle-viewport-positioning viewport-ref)
+
+               :else
+               (js/console.log "on-mouse-down" event)))))
 
         on-context-menu
         (mf/use-callback
@@ -168,11 +173,15 @@
         (mf/use-callback
          (fn [event]
            (dom/stop-propagation event)
-           (let [ctrl? (kbd/ctrl? event)
+           (let [event (.-nativeEvent event)
+                 ctrl? (kbd/ctrl? event)
                  shift? (kbd/shift? event)
                  opts {:shift? shift?
                        :ctrl? ctrl?}]
-             (st/emit! (ms/->MouseEvent :up ctrl? shift?)))))
+             (st/emit! (ms/->MouseEvent :up ctrl? shift?))
+
+             (when (= 2 (.-which event))
+               (st/emit! ::finish-positioning)))))
 
         on-click
         (mf/use-callback
@@ -207,7 +216,7 @@
              (when-not (.-repeat bevent)
                (st/emit! (ms/->KeyboardEvent :down key ctrl? shift?))
                (when (kbd/space? event)
-                 (st/emit! handle-viewport-positioning))))))
+                 (handle-viewport-positioning viewport-ref))))))
 
         on-key-up
         (mf/use-callback
@@ -219,14 +228,8 @@
                        :shift? shift?
                        :ctrl? ctrl?}]
              (when (kbd/space? event)
-               (st/emit! ::finish-positioning #_(dw/stop-viewport-positioning)))
+               (st/emit! ::finish-positioning))
              (st/emit! (ms/->KeyboardEvent :up key ctrl? shift?)))))
-
-        posx  (mf/use-state 0)
-        posy  (mf/use-state 0)
-
-        width (mf/use-state c/viewport-width)
-        height (mf/use-state c/viewport-height)
 
         translate-point-to-viewport
         (fn [pt]
@@ -236,7 +239,7 @@
                 brect (gpt/point (d/parse-integer (.-left brect))
                                  (d/parse-integer (.-top brect)))
                 box   (gpt/point (.-x vbox)
-                               (.-y vbox))
+                                 (.-y vbox))
                 ]
             (-> (gpt/subtract pt brect)
                 (gpt/divide (gpt/point @refs/selected-zoom))
@@ -244,8 +247,14 @@
 
         on-mouse-move
         (fn [event]
-          (let [pt (gpt/point (.-clientX event) (.-clientY event))
-                pt (translate-point-to-viewport pt)]
+          (let [event (.getBrowserEvent event)
+                pt (gpt/point (.-clientX event) (.-clientY event))
+                pt (translate-point-to-viewport pt)
+                delta (gpt/point (.-movementX event)
+                                 (.-movementY event))]
+            (st/emit! (ms/->PointerEvent :delta delta
+                                         (kbd/ctrl? event)
+                                         (kbd/shift? event)))
             (st/emit! (ms/->PointerEvent :viewport pt
                                          (kbd/ctrl? event)
                                          (kbd/shift? event)))))
@@ -253,8 +262,11 @@
         (fn [event]
           (let [node (mf/ref-val viewport-ref)
                 parent (.-parentElement ^js node)]
-            (reset! width (.-clientWidth ^js parent))
-            (reset! height (.-clientHeight ^js parent))))
+            (st/emit! (dw/update-viewport-size {:width (.-clientWidth ^js parent)
+                                                :height (.-clientHeight ^js parent)}))))
+
+            ;; (reset! width (.-clientWidth ^js parent))
+            ;; (reset! height (.-clientHeight ^js parent))))
 
         on-mouse-wheel
         (mf/use-callback
@@ -269,10 +281,13 @@
                  (st/emit! dw/increase-zoom)))
            (let [event (.getBrowserEvent event)
                  delta (.-deltaY ^js event)]
-             (js/console.log "on-mouse-wheel" event)
              (if (kbd/shift? event)
-               (swap! posx + delta)
-               (swap! posy + delta))))))
+               (st/emit! (dw/update-viewport-size {:x #(+ % delta)}))
+               (st/emit! (dw/update-viewport-size {:y #(+ % delta)})))))))
+
+
+               ;; (swap! posx + delta)
+               ;; (swap! posy + delta))))))
 
         on-drag-over
         ;; Should prevent only events that we'll handle on-drop
@@ -315,12 +330,12 @@
     [:*
      [:& coordinates {:zoom zoom}]
      [:svg.viewport {
-                     :width @width
-                     :height @height
-                     :view-box (str/join " " [@posx
-                                              @posy
-                                              (/ @width zoom)
-                                              (/ @height zoom)])
+                     :width (:width size)
+                     :height (:height size)
+                     :view-box (str/join " " [(:x size)
+                                              (:y size)
+                                              (:width size)
+                                              (:height size)])
                      :ref viewport-ref
                      :class (when drawing-tool "drawing")
                      :on-context-menu on-context-menu
