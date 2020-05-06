@@ -335,14 +335,10 @@
       (watch [_ state stream]
         (let [stoper (rx/filter #(or (interrupt? %)
                                      (ms/mouse-up? %))
-                                stream)
-              zoom (get-in state [:workspace-local :zoom])
-              zoom (gpt/point zoom zoom)]
+                                stream)]
           (rx/concat
            (rx/of deselect-all)
            (->> ms/mouse-position
-                (rx/map (fn [point]
-                          (gpt/divide point zoom)))
                 (rx/scan (fn [data pos]
                            (if data
                              (assoc data :stop pos)

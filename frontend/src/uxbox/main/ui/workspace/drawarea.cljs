@@ -152,8 +152,7 @@
               stoper (rx/filter stoper? stream)
               initial @ms/mouse-position
               snap-data (get state :workspace-snap-data)
-              mouse (->> ms/mouse-position
-                         (rx/map #(gpt/divide % (gpt/point zoom))))
+              mouse ms/mouse-position
 
               page-id (get state :current-page-id)
               objects (get-in state [:workspace-data page-id :objects])
