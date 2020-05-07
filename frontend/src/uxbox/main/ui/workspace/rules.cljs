@@ -7,130 +7,142 @@
 
 (ns uxbox.main.ui.workspace.rules
   (:require
-   [beicon.core :as rx]
-   [cuerdas.core :as str]
    [rumext.alpha :as mf]
-   [uxbox.main.constants :as c]
-   [uxbox.main.refs :as refs]
-   [uxbox.main.store :as s]
-   [uxbox.main.streams :as ms]
-   [uxbox.main.ui.hooks :refer [use-rxsub]]
-   [uxbox.util.dom :as dom]))
-
-(def MIN-VAL -50000)
-(def MAX-VAL +50000)
+   [uxbox.util.object :as obj]))
 
 (def STEP-SIZE 10)
 (def STEP-PADDING 20)
 
-(defn- impl-make-vertical-ticks
-  [zoom]
-  (let [btm (/ 100 zoom)
-        mtm (/ 50 zoom)
-        labels #js []
-        path   #js []]
-    (loop [i   MIN-VAL]
-      (if (> i MAX-VAL)
-        (str "<path d=\"" (.join path "") "\"/>" (.join labels ""))
-        (let [pos (+ (* i zoom) 50)]
-          (cond
-            (< (mod i btm) STEP-SIZE)
-            (do
-              (.push path (str "M 5 " pos " L " STEP-PADDING " " pos))
-              (.push labels (str "<text y=\"" (- pos 3) "\" x=\"5\" fill=\"#9da2a6\" "
-                                 "transform=\"rotate(90 0 " pos ")\" "
-                                 "style=\"font-size: 12px\">" i "</text>"))
-              (recur (+ i STEP-SIZE)))
-
-            (< (mod i mtm) STEP-SIZE)
-            (do
-              (.push path (str "M 10 " pos " L " STEP-PADDING " " pos))
-              (recur (+ i STEP-SIZE)))
-
-            :else
-            (do
-              (.push path (str "M 15 " pos " L " STEP-PADDING " " pos))
-              (recur (+ i STEP-SIZE)))))))))
-
-
-(defn- impl-make-horizontal-ticks
-  [zoom]
-  (let [btm (/ 100 zoom)
-        mtm (/ 50 zoom)
-        labels #js []
-        path   #js []]
-    (loop [i   MIN-VAL]
-      (if (> i MAX-VAL)
-        (str "<path d=\"" (.join path "") "\"/>" (.join labels ""))
-        (let [pos (+ (* i zoom) 50)]
-          (cond
-            (< (mod i btm) STEP-SIZE)
-            (do
-              (.push path (str "M " pos " 5 L " pos " " STEP-PADDING))
-              (.push labels (str "<text x=\"" (+ pos 2) "\" y=\"13\" fill=\"#9da2a6\" "
-                                 "style=\"font-size: 12px\">" i "</text>"))
-              (recur (+ i STEP-SIZE)))
-
-            (< (mod i mtm) STEP-SIZE)
-            (do
-              (.push path (str "M " pos " 10 L " pos " " STEP-PADDING))
-              (recur (+ i STEP-SIZE)))
-
-            :else
-            (do
-              (.push path (str "M " pos " 15 L " pos " " STEP-PADDING))
-              (recur (+ i STEP-SIZE)))))))))
-
-
-(def impl-make-horizontal-ticks' (memoize impl-make-horizontal-ticks))
-(def impl-make-vertical-ticks' (memoize impl-make-vertical-ticks))
-
-
-;; --- Horizontal Rule Ticks (Component)
-
-(mf/defc horizontal-rule-ticks
-  {:wrap [mf/memo]}
-  [{:keys [zoom]}]
-  [{:keys [zoom]}]
-  (let [svg (impl-make-horizontal-ticks' zoom)]
-    [:g {:dangerouslySetInnerHTML #js {"__html" svg}}]))
-
-;; --- Vertical Rule Ticks (Component)
-
-(mf/defc vertical-rule-ticks
-  {:wrap [mf/memo]}
-  [{:keys [zoom]}]
-  (let [svg (impl-make-vertical-ticks' zoom)]
-    [:g {:dangerouslySetInnerHTML #js {"__html" svg}}]))
-
-;; --- Horizontal Rule (Component)
-
 (mf/defc horizontal-rule
-  {:wrap [mf/memo]}
+  {::mf/wrap [mf/memo #(mf/throttle % 60)]}
   [{:keys [zoom size]}]
-  (let [trx (- 0 (:x size))
-        trx (* trx zoom)
-        trx (- trx 50)]
-    [:svg.horizontal-rule {:width (:width size) :height 20}
-     [:rect {:x 0
-             :y 0
-             :width (:width size)
-             :height 20}]
-     [:g {:transform (str  "translate(" trx ", 0)")}
-      [:& horizontal-rule-ticks {:zoom zoom}]]]))
+  (let [canvas (mf/use-ref)
+        {:keys [x width]} size]
+    (mf/use-layout-effect
+     (mf/deps width x zoom)
+     (fn []
+       (let [node (mf/ref-val canvas)
+             dctx (.getContext node "2d")
+
+             btm (/ 100 zoom)
+             mtm (/ 50 zoom)
+             trx (- (* (- 0 x) zoom) 50)
+
+             mm (mod x STEP-SIZE)
+             min-val (+ x (js/Math.abs (- STEP-SIZE mm)))
+             max-val (+ x width)]
+
+         (obj/set! node "width" width)
+
+         (obj/set! dctx "fillStyle" "#E8E9EA")
+         (.fillRect dctx 0 0 width 20)
+
+         (obj/set! dctx "font" "11px serif")
+         (obj/set! dctx "fillStyle" "#7B7D85")
+         (obj/set! dctx "strokeStyle" "#7B7D85")
+
+         (.translate dctx trx 0)
+
+         (loop [i min-val]
+           (when (< i max-val)
+             (let [pos (+ (* i zoom) 50)]
+               (when (< (mod i btm) STEP-SIZE)
+                 (.fillText dctx (str i) (+ pos 5) 12))
+               (recur (+ i STEP-SIZE)))))
+
+         (let [path (js/Path2D.)]
+           (loop [i min-val]
+             (if (> i max-val)
+               (.stroke dctx path)
+               (let [pos (+ (* i zoom) 50)]
+                 (cond
+                   (< (mod i btm) STEP-SIZE)
+                   (do
+                     (.moveTo path pos 5)
+                     (.lineTo path pos STEP-PADDING)
+                     (recur (+ i STEP-SIZE)))
+
+                   (< (mod i mtm) STEP-SIZE)
+                   (do
+                     (.moveTo path pos 10)
+                     (.lineTo path pos STEP-PADDING)
+                     (recur (+ i STEP-SIZE)))
+
+                   :else
+                   (do
+                     (.moveTo path pos 15)
+                     (.lineTo path pos STEP-PADDING)
+                     (recur (+ i STEP-SIZE)))))))))))
+
+    [:canvas.horizontal-rule {:ref canvas :width (:width size) :height 20}]))
+
 
 ;; --- Vertical Rule (Component)
 
 (mf/defc vertical-rule
-  {:wrap [mf/memo]}
+  {::mf/wrap [mf/memo #(mf/throttle % 60)]}
   [{:keys [zoom size]}]
-  (let [try (- 0 (:y size))
-        try (* try zoom)
-        try (- try 50)]
-    [:svg.vertical-rule {:width 20 :height (:height size)}
-     [:rect {:x 0
-             :y 0
-             :width 20
-             :height (:height size)}]
-     [:g {:transform (str  "translate(0, " try ")")}
-      [:& vertical-rule-ticks {:zoom zoom}]]]))
+  (let [canvas (mf/use-ref)
+        {:keys [y height]} size]
+    (mf/use-layout-effect
+     (mf/deps height y zoom)
+     (fn []
+       (let [node (mf/ref-val canvas)
+             dctx (.getContext node "2d")
+
+             btm (/ 100 zoom)
+             mtm (/ 50 zoom)
+             try (- (* (- 0 y) zoom) 50)
+
+             mm (mod y STEP-SIZE)
+             min-val (+ y (js/Math.abs (- STEP-SIZE mm)))
+             max-val (+ y height)]
+
+         (obj/set! node "height" height)
+
+         (obj/set! dctx "fillStyle" "#E8E9EA")
+         (.fillRect dctx 0 0 20 height)
+
+         (obj/set! dctx "font" "11px serif")
+         (obj/set! dctx "fillStyle" "#7B7D85")
+         (obj/set! dctx "strokeStyle" "#7B7D85")
+
+         (.translate dctx 0 try)
+
+         (loop [i min-val]
+           (when (< i max-val)
+             (let [pos (+ (* i zoom) 50)]
+               (when (< (mod i btm) STEP-SIZE)
+                 (.save dctx)
+                 (.translate dctx 12 (- pos 5))
+                 (.rotate dctx (/ (* 270 js/Math.PI) 180))
+                 (.fillText dctx (str i) 0 0)
+                 (.restore dctx))
+               (recur (+ i STEP-SIZE)))))
+
+         (let [path (js/Path2D.)]
+           (loop [i min-val]
+             (if (> i max-val)
+               (.stroke dctx path)
+               (let [pos (+ (* i zoom) 50)]
+                 (cond
+                   (< (mod i btm) STEP-SIZE)
+                   (do
+                     (.moveTo path 5 pos)
+                     (.lineTo path STEP-PADDING pos)
+                     (recur (+ i STEP-SIZE)))
+
+                   (< (mod i mtm) STEP-SIZE)
+                   (do
+                     (.moveTo path 10 pos)
+                     (.lineTo path STEP-PADDING pos)
+                     (recur (+ i STEP-SIZE)))
+
+                   :else
+                   (do
+                     (.moveTo path 15 pos)
+                     (.lineTo path STEP-PADDING pos)
+                     (recur (+ i STEP-SIZE)))))))))))
+
+    [:canvas.vertical-rule {:ref canvas :width 20 :height height}]))
+

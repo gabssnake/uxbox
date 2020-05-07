@@ -59,6 +59,7 @@
       [:section.workspace-viewport
        (when (contains? layout :rules)
          [:*
+          [:div.empty-rule-square]
           [:& horizontal-rule {:zoom (:zoom local)
                                :size (:size local)}]
           [:& vertical-rule {:zoom (:zoom local 1)

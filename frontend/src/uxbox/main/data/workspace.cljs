@@ -1358,6 +1358,7 @@
   {"ctrl+shift+m" #(st/emit! (toggle-layout-flag :sitemap))
    "ctrl+shift+i" #(st/emit! (toggle-layout-flag :libraries))
    "ctrl+shift+l" #(st/emit! (toggle-layout-flag :layers))
+   "ctrl+shift+r" #(st/emit! (toggle-layout-flag :rules))
    "+" #(st/emit! increase-zoom)
    "-" #(st/emit! decrease-zoom)
    "ctrl+g" #(st/emit! create-group)
