@@ -15,7 +15,6 @@
    [uxbox.main.store :as s]
    [uxbox.main.streams :as ms]
    [uxbox.main.ui.hooks :refer [use-rxsub]]
-   ["./rules_impl.js" :as impl]
    [uxbox.util.dom :as dom]))
 
 (def MIN-VAL -50000)
@@ -93,7 +92,7 @@
   {:wrap [mf/memo]}
   [{:keys [zoom]}]
   [{:keys [zoom]}]
-  (let [svg (time (impl-make-horizontal-ticks zoom))]
+  (let [svg (impl-make-horizontal-ticks' zoom)]
     [:g {:dangerouslySetInnerHTML #js {"__html" svg}}]))
 
 ;; --- Vertical Rule Ticks (Component)
@@ -101,7 +100,7 @@
 (mf/defc vertical-rule-ticks
   {:wrap [mf/memo]}
   [{:keys [zoom]}]
-  (let [svg (impl-make-vertical-ticks zoom)]
+  (let [svg (impl-make-vertical-ticks' zoom)]
     [:g {:dangerouslySetInnerHTML #js {"__html" svg}}]))
 
 ;; --- Horizontal Rule (Component)
