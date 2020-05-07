@@ -121,15 +121,15 @@
                             :key (:id item)}]))]))
 
 (mf/defc viewport
-  [{:keys [page] :as props}]
-  (let [{:keys [drawing-tool
+  [{:keys [page local] :as props}]
+  (let [
+        {:keys [drawing-tool
                 zoom
                 flags
                 size
                 edition
                 tooltip
-                selected]
-         :as local} (mf/deref refs/workspace-local)
+                selected]} local
 
         viewport-ref (mf/use-ref nil)
         last-position (mf/use-var nil)
@@ -334,8 +334,8 @@
                      :height (:height size)
                      :view-box (str/join " " [(:x size)
                                               (:y size)
-                                              (:width size)
-                                              (:height size)])
+                                              (/ (:width size) zoom)
+                                              (/ (:height size) zoom)])
                      :ref viewport-ref
                      :class (when drawing-tool "drawing")
                      :on-context-menu on-context-menu

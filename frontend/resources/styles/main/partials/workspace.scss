@@ -123,9 +123,15 @@
     overflow: hidden;
     transition: none;
     width: 100%;
-    margin-top: 20px;
+
+    display: grid;
+    grid-template-rows: 20px 1fr;
+    grid-template-columns: 20px 1fr;
 
     .viewport {
+      grid-column: 2 / span 1;
+      grid-row: 2 / span 1;
+
       &.drawing {
         cursor: cell;
       }
@@ -159,9 +165,10 @@
 
   .horizontal-rule {
     transition: none;
-    position: absolute;
     pointer-events: none;
-    top: 0px;
+    grid-column: 2 / span 1;
+    grid-row: 1 / span 1;
+    z-index: 13;
 
     rect {
       fill: $color-canvas;
@@ -174,7 +181,9 @@
   .vertical-rule {
     transition: none;
     pointer-events: none;
-    left: 0px;
+    grid-column: 1 / span 1;
+    grid-row: 2 / span 1;
+    z-index: 13;
 
     rect {
       fill: $color-canvas;
