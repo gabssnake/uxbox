@@ -11,10 +11,12 @@
   "A common (clj/cljs) functions and specs for pages."
   (:require
    [clojure.spec.alpha :as s]
-   [uxbox.common.uuid :as uuid]
    [uxbox.common.data :as d]
+   [uxbox.common.pages-helpers :as cph]
    [uxbox.common.exceptions :as ex]
-   [uxbox.common.spec :as us]))
+   [uxbox.common.geom.shapes :as geom]
+   [uxbox.common.spec :as us]
+   [uxbox.common.uuid :as uuid]))
 
 (def page-version 5)
 
@@ -22,107 +24,18 @@
 ;; Page Data Structure Helpers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn get-children
-  "Retrieve all children ids recursively for a given object"
-  [id objects]
-  (let [shapes (get-in objects [id :shapes])]
-    (if shapes
-      (d/concat shapes (mapcat #(get-children % objects) shapes))
-      [])))
+;; NOTE: backward compatibility
 
-(defn is-shape-grouped
-  "Checks if a shape is inside a group"
-  [shape-id objects]
-  (let [contains-shape-fn (fn [{:keys [shapes]}] ((set shapes) shape-id))
-        shapes (remove #(= (:type %) :frame) (vals objects))]
-    (some contains-shape-fn shapes)))
-
-(defn get-parent
-  "Retrieve the id of the parent for the shape-id (if exists)"
-  [shape-id objects]
-  (let [check-parenthood
-        (fn [shape]
-          (when (and (:shapes shape)
-                     ((set (:shapes shape)) shape-id))
-            (:id shape)))]
-    (some check-parenthood (vals objects))))
-
-(defn calculate-child-parent-map
-  [objects]
-  (let [red-fn
-        (fn [acc {:keys [id shapes]}]
-          ;; Insert every pair shape -> parent into accumulated value
-          (into acc (map #(vector % id) (or shapes []))))]
-    (reduce red-fn {} (vals objects))))
-
-(defn get-all-parents
-  [shape-id objects]
-  (let [child->parent (calculate-child-parent-map objects)
-        rec-fn (fn [cur result]
-                 (if-let [parent (child->parent cur)]
-                   (recur parent (conj result parent))
-                   (vec (reverse result))))]
-    (rec-fn shape-id [])))
-
-(defn- calculate-invalid-targets
-  [shape-id objects]
-  (let [result #{shape-id}
-        children (get-in objects [shape-id :shape])
-        reduce-fn (fn [result child-id]
-                    (into result (calculate-invalid-targets child-id objects)))]
-    (reduce reduce-fn result children)))
-
-(defn- valid-frame-target
-  [shape-id parent-id objects]
-  (let [shape (get objects shape-id)]
-    (or (not= (:type shape) :frame)
-        (= parent-id uuid/zero))))
-
-(defn- insert-at-index
-  [shapes index ids]
-  (let [[before after] (split-at index shapes)
-        p? (set ids)]
-    (d/concat []
-              (remove p? before)
-              ids
-              (remove p? after))))
-
-(defn select-toplevel-shapes
-  ([objects] (select-toplevel-shapes objects nil))
-  ([objects {:keys [include-frames?] :or {include-frames? false}}]
-   (let [lookup #(get objects %)
-         root   (lookup uuid/zero)
-         childs (:shapes root)]
-     (loop [id  (first childs)
-            ids (rest childs)
-            res []]
-       (if (nil? id)
-         res
-         (let [obj (lookup id)
-               typ (:type obj)]
-           (recur (first ids)
-                  (rest ids)
-                  (if (= :frame typ)
-                    (if include-frames?
-                      (d/concat res [obj] (map lookup (:shapes obj)))
-                      (d/concat res (map lookup (:shapes obj))))
-                    (conj res obj)))))))))
-
-(defn select-frames
-  [objects]
-  (let [root   (get objects uuid/zero)
-        loopfn (fn loopfn [ids]
-                 (let [obj (get objects (first ids))]
-                   (cond
-                     (nil? obj)
-                     nil
-
-                     (= :frame (:type obj))
-                     (lazy-seq (cons obj (loopfn (rest ids))))
-
-                     :else
-                     (lazy-seq (loopfn (rest ids))))))]
-    (loopfn (:shapes root))))
+(def calculate-child-parent-map cph/calculate-child-parent-map)
+(def calculate-invalid-targets cph/calculate-invalid-targets)
+(def get-all-parents cph/get-all-parents)
+(def get-children cph/get-children)
+(def get-parent cph/get-parent)
+(def insert-at-index cph/insert-at-index)
+(def is-shape-grouped cph/is-shape-grouped)
+(def select-frames cph/select-frames)
+(def select-toplevel-shapes cph/select-toplevel-shapes)
+(def valid-frame-target cph/valid-frame-target)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Page Transformation Changes
@@ -297,6 +210,10 @@
   (s/keys :req-un [::id]
           :opt-un [::session-id]))
 
+(defmethod change-spec-impl :reg-obj [_]
+  (s/keys :req-un [::id]
+          :opt-un [::session-id]))
+
 (defmethod change-spec-impl :mov-objects [_]
   (s/keys :req-un [::parent-id ::shapes]
           :opt-un [::index]))
@@ -418,6 +335,7 @@
                (contains? objects frame-id))
       (let [obj (assoc obj
                    :frame-id frame-id
+                   :parent-id parent-id
                    :id id)]
         (-> data
             (update :objects assoc id obj)
@@ -455,9 +373,34 @@
         (seq shapes)   ; Recursive delete all dependend objects
         (as-> $ (reduce #(or (process-change %1 {:type :del-obj :id %2}) %1) $ shapes))))))
 
+(defn- regenerate-selrect-and-points
+  [{:keys [id type shapes] :as obj} objects]
+  (let [shapes  (map (partial get objects) shapes)
+        selrect (geom/selection-rect shapes)]
+    (as-> obj $
+      (assoc $
+             :x (:x selrect)
+             :y (:y selrect)
+             :width (:width selrect)
+             :height (:height selrect))
+
+      (assoc $ :points (geom/shape->points $))
+      (assoc $ :selrect (geom/points->selrect (:points $))))))
+
+(defmethod process-change :reg-obj
+  [data {:keys [id]}]
+  (let [objects (:objects data)]
+    (loop [item (get objects id)
+           data data]
+      (if (= :group (:type item))
+        (let [parent-id (get-parent (:id item) objects)]
+          (recur (get objects parent-id)
+                 (update-in data [:objects (:id item)] regenerate-selrect-and-points objects)))
+        data))))
+
 (defmethod process-change :mov-objects
   [data {:keys [parent-id shapes index] :as change}]
-  (let [child->parent (calculate-child-parent-map (:objects data))
+  (let [cpindex (calculate-child-parent-map (:objects data))
         ;; Check if the move from shape-id -> parent-id is valid
         is-valid-move
         (fn [shape-id]
@@ -486,8 +429,8 @@
 
         ;; Remove from the old :shapes the references that have been moved
         remove-in-parent
-        (fn [data shape-id]
-          (let [parent-id' (get child->parent shape-id)]
+        (fn remove-in-parent [data shape-id]
+          (let [parent-id' (get cpindex shape-id)]
             ;; Do nothing if the parent id of the shape is the same as
             ;; the new destination target parent id.
             (if (= parent-id' parent-id)
@@ -499,7 +442,8 @@
                          (empty? (:shapes parent)))
                   (-> data
                       (update :objects dissoc (:id parent))
-                      (update-in [:objects (:frame-id parent) :shapes] (strip-id (:id parent))))
+                      (update-in [:objects (:frame-id parent) :shapes] (strip-id (:id parent)))
+                      (remove-in-parent parent-id'))
                   (update data :objects assoc parent-id' parent))))))
 
         parent (get-in data [:objects parent-id])
@@ -508,6 +452,10 @@
                  (get-in data [:objects (:frame-id parent)]))
 
         frame-id (:id frame)
+
+        update-parent-id
+        (fn [data id]
+          (update-in data [:objects id] assoc :parent-id parent-id))
 
         ;; Updates the frame-id references that might be outdated
         update-frame-ids
@@ -521,6 +469,7 @@
     (when valid?
       (as-> data $
         (update-in $ [:objects parent-id :shapes] insert-items)
+        (reduce update-parent-id $ shapes)
         (reduce remove-in-parent $ shapes)
         (reduce update-frame-ids $ (get-in $ [:objects parent-id :shapes]))))))
 

@@ -652,6 +652,7 @@
 (s/def ::loc  #{:up :down :bottom :top})
 
 ;; --- Delete Selected
+
 (defn- delete-shapes
   [ids]
   (us/assert (s/coll-of ::us/uuid) ids)
@@ -663,6 +664,7 @@
             cpindex (cp/calculate-child-parent-map objects)
 
             del-change #(array-map :type :del-obj :id %)
+            reg-change #(array-map :type :reg-obj :id %)
 
             get-empty-parents
             (fn get-empty-parents [id]
@@ -673,25 +675,45 @@
                                   (get-empty-parents (:id parent))))
                   nil)))
 
+            get-group-parents
+            (fn get-group-parents [id]
+              (let [parent-id (get cpindex id)
+                    parent    (get objects parent-id)]
+                (if (= :group (:type parent))
+                  (lazy-seq (cons parent-id (get-group-parents parent-id)))
+                  nil)))
+
             rchanges
             (reduce (fn [res id]
                       (let [chd (cp/get-children id objects)]
-                        (into res (d/concat
-                                   (mapv del-change (reverse chd))
-                                   [(del-change id)]
-                                   (map del-change (get-empty-parents id))))))
+                        (d/concat res
+                                  (map del-change (reverse chd))
+                                  [(del-change id)]
+                                  (map del-change (get-empty-parents id))
+                                  (map reg-change (get-group-parents id)))))
                     []
                     ids)
 
             uchanges
-            (mapv (fn [id]
-                    (let [obj (get objects id)]
-                     {:type :add-obj
-                      :id id
-                      :frame-id (:frame-id obj)
-                      :parent-id (get cpindex id)
-                      :obj obj}))
-                  (reverse (map :id rchanges)))]
+            (reduce (fn [res id]
+                      (let [obj (get objects id)
+                            chg {:type :add-obj
+                                 :id id
+                                 :frame-id (:frame-id obj)
+                                 :parent-id (get cpindex id)
+                                 :obj obj}]
+                        (d/concat res [chg]
+                                  (map reg-change (get-group-parents id)))))
+                    []
+                    (->> rchanges
+                         (filter #(= :del-obj (:type %)))
+                         (map :id)
+                         (reverse)))]
+
+        ;; (println "================ rchanges")
+        ;; (cljs.pprint/pprint rchanges)
+        ;; (println "================ uchanges")
+        ;; (cljs.pprint/pprint uchanges)
         (rx/of (dwc/commit-changes rchanges uchanges {:commit-local? true}))))))
 
 (def delete-selected

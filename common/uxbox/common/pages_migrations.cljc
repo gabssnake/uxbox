@@ -8,6 +8,8 @@
    [uxbox.common.uuid :as uuid]
    [uxbox.common.data :as d]))
 
+;; TODO: revisit this
+
 (defmulti migrate :version)
 
 (defn migrate-data
