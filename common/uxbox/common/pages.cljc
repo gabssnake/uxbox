@@ -334,9 +334,9 @@
     (when (and (contains? objects parent-id)
                (contains? objects frame-id))
       (let [obj (assoc obj
-                   :frame-id frame-id
-                   :parent-id parent-id
-                   :id id)]
+                       :frame-id frame-id
+                       :parent-id parent-id
+                       :id id)]
         (-> data
             (update :objects assoc id obj)
             (update-in [:objects parent-id :shapes]
@@ -373,21 +373,6 @@
         (seq shapes)   ; Recursive delete all dependend objects
         (as-> $ (reduce #(or (process-change %1 {:type :del-obj :id %2}) %1) $ shapes))))))
 
-(defn- regenerate-selrect-and-points
-  [{:keys [id type shapes] :as obj} objects]
-  (let [shapes  (map (partial get objects) shapes)
-        selrect (geom/selection-rect shapes)]
-    (as-> obj $
-      (assoc $
-             :x (:x selrect)
-             :y (:y selrect)
-             :width (:width selrect)
-             :height (:height selrect))
-
-      (assoc $ :points (geom/shape->points $))
-      (assoc $ :selrect (geom/points->selrect (:points $))))))
-
-
 ;; Recursivelly regenerate the precalculated data on the specified
 ;; object (only parent group objects are realculcated).
 
@@ -401,15 +386,31 @@
         (if (= :group (:type item))
           (recur
            (get objects (:parent-id item))
-           (update-in data [:objects (:id item)] regenerate-selrect-and-points objects))
+           (update-in data [:objects (:id item)]
+                      (fn [{:keys [shapes] :as obj}]
+                        (let [shapes (->> shapes
+                                          (map (partial get objects))
+                                          (filter identity))]
+                          (if (seq shapes)
+                            (let [selrect (geom/selection-rect shapes)]
+                              (as-> obj $
+                                (assoc $
+                                       :x (:x selrect)
+                                       :y (:y selrect)
+                                       :width (:width selrect)
+                                       :height (:height selrect))
+                                (assoc $ :points (geom/shape->points $))
+                                (assoc $ :selrect (geom/points->selrect (:points $)))))
+                            obj)))))
           (recur
            (get objects (:parent-id item))
            data))))))
 
 (defmethod process-change :mov-objects
   [data {:keys [parent-id shapes index] :as change}]
-  (let [cpindex (calculate-child-parent-map (:objects data))
+  (let [
         ;; Check if the move from shape-id -> parent-id is valid
+
         is-valid-move
         (fn [shape-id]
           (let [invalid-targets (calculate-invalid-targets shape-id (:objects data))]
@@ -435,24 +436,31 @@
         (fn [id]
           (fn [coll] (filterv #(not= % id) coll)))
 
-        ;; Remove from the old :shapes the references that have been moved
-        remove-in-parent
-        (fn remove-in-parent [data shape-id]
-          (let [parent-id' (get cpindex shape-id)]
+        cpindex
+        (reduce
+         (fn [index id]
+           (let [obj (get-in data [:objects id])]
+             (assoc index id (:parent-id obj))))
+         {} (keys (:objects data)))
+
+        remove-from-old-parent
+        (fn remove-from-old-parent [data shape-id]
+          (let [prev-parent-id (get cpindex shape-id)]
             ;; Do nothing if the parent id of the shape is the same as
             ;; the new destination target parent id.
-            (if (= parent-id' parent-id)
+            (if (= prev-parent-id parent-id)
               data
-              (let [parent (-> (get-in data [:objects parent-id'])
-                               (update :shapes (strip-id shape-id)))]
-                ;; When the group is empty we should remove it
-                (if (and (= :group (:type parent))
-                         (empty? (:shapes parent)))
-                  (-> data
-                      (update :objects dissoc (:id parent))
-                      (update-in [:objects (:frame-id parent) :shapes] (strip-id (:id parent)))
-                      (remove-in-parent parent-id'))
-                  (update data :objects assoc parent-id' parent))))))
+              (loop [sid  shape-id
+                     pid  prev-parent-id
+                     data data]
+                (let [obj (get-in data [:objects pid])]
+                  (if (and (= 1 (count (:shapes obj)))
+                           (= sid (first (:shapes obj)))
+                           (= :group (:type obj)))
+                    (recur pid
+                           (:parent-id obj)
+                           (update data :objects dissoc pid))
+                    (update-in data [:objects pid :shapes] (strip-id sid))))))))
 
         parent (get-in data [:objects parent-id])
         frame  (if (= :frame (:type parent))
@@ -461,7 +469,7 @@
 
         frame-id (:id frame)
 
-        ;; Update parent-id references
+        ;; Update parent-id references.
         update-parent-id
         (fn [data id]
           (update-in data [:objects id] assoc :parent-id parent-id))
@@ -470,7 +478,7 @@
         update-frame-ids
         (fn update-frame-ids [data id]
           (let [data (assoc-in data [:objects id :frame-id] frame-id)
-                obj (get-in data [:objects id])]
+                obj  (get-in data [:objects id])]
             (cond-> data
               (not= :frame (:type obj))
               (as-> $$ (reduce update-frame-ids $$ (:shapes obj))))))]
@@ -479,8 +487,9 @@
       (as-> data $
         (update-in $ [:objects parent-id :shapes] insert-items)
         (reduce update-parent-id $ shapes)
-        (reduce remove-in-parent $ shapes)
-        (reduce update-frame-ids $ (:shapes parent))))))
+        (reduce remove-from-old-parent $ shapes)
+        (reduce update-frame-ids $ (get-in $ [:objects parent-id :shapes]))))))
+
 
 (defmethod process-operation :set
   [shape op]

@@ -697,13 +697,14 @@
             uchanges
             (reduce (fn [res id]
                       (let [obj (get objects id)
-                            chg {:type :add-obj
-                                 :id id
-                                 :frame-id (:frame-id obj)
-                                 :parent-id (get cpindex id)
-                                 :obj obj}]
-                        (d/concat res [chg]
-                                  (map reg-change (get-group-parents id)))))
+                            chg1 {:type :add-obj
+                                  :id id
+                                  :frame-id (:frame-id obj)
+                                  :parent-id (get cpindex id)
+                                  :obj obj}
+                            chg2 {:type :reg-obj
+                                  :id id}]
+                        (d/concat res [chg1 chg2])))
                     []
                     (->> rchanges
                          (filter #(= :del-obj (:type %)))
@@ -1240,7 +1241,6 @@
         (when (not-empty selected)
           (let [page-id (get-in state [:workspace-page :id])
                 objects (get-in state [:workspace-data page-id :objects])
-
                 selected-objects (map (partial get objects) selected)
                 selrect  (geom/selection-rect selected-objects)
                 frame-id (-> selected-objects first :frame-id)
@@ -1251,7 +1251,6 @@
                               (map-indexed vector)
                               (filter #(selected (second %)))
                               (ffirst))
-
                 rchanges [{:type :add-obj
                            :id id
                            :frame-id frame-id
@@ -1265,6 +1264,13 @@
                            :shapes (vec selected)}
                           {:type :del-obj
                            :id id}]]
+
+            ;; (cljs.pprint/pprint objects)
+            ;; (cljs.pprint/pprint rchanges)
+            ;; (cljs.pprint/pprint {:objects objects})
+            ;; (println "=======")
+            ;; (cljs.pprint/pprint (cp/process-changes {:objects objects} rchanges))
+
             (rx/of (dwc/commit-changes rchanges uchanges {:commit-local? true})
                    (dws/select-shapes #{id}))))))))
 

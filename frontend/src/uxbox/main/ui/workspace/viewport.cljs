@@ -432,7 +432,7 @@
      [:g
       [:& frames {:key (:id page)}]
 
-      [:& shape-outlines]
+      ;; [:& shape-outlines]
 
       (when (seq selected)
         [:& selection-handlers {:selected selected
