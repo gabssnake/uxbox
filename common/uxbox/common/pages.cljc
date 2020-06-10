@@ -393,7 +393,7 @@
     (loop [item (get objects id)
            data data]
       (if (= :group (:type item))
-        (let [parent-id (get-parent (:id item) objects)]
+        (let [parent-id (:parent-id item)]
           (recur (get objects parent-id)
                  (update-in data [:objects (:id item)] regenerate-selrect-and-points objects)))
         data))))
@@ -453,6 +453,7 @@
 
         frame-id (:id frame)
 
+        ;; Update parent-id references
         update-parent-id
         (fn [data id]
           (update-in data [:objects id] assoc :parent-id parent-id))
@@ -471,7 +472,7 @@
         (update-in $ [:objects parent-id :shapes] insert-items)
         (reduce update-parent-id $ shapes)
         (reduce remove-in-parent $ shapes)
-        (reduce update-frame-ids $ (get-in $ [:objects parent-id :shapes]))))))
+        (reduce update-frame-ids $ (:shapes parent))))))
 
 (defmethod process-operation :set
   [shape op]

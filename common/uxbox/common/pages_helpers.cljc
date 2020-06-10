@@ -30,12 +30,8 @@
 (defn get-parent
   "Retrieve the id of the parent for the shape-id (if exists)"
   [shape-id objects]
-  (let [check-parenthood
-        (fn [shape]
-          (when (and (:shapes shape)
-                     ((set (:shapes shape)) shape-id))
-            (:id shape)))]
-    (some check-parenthood (vals objects))))
+  (let [obj (get objects shape-id)]
+    (:parent-id obj)))
 
 (defn calculate-child-parent-map
   [objects]
@@ -54,7 +50,7 @@
                    (vec (reverse result))))]
     (rec-fn shape-id [])))
 
-(defn- calculate-invalid-targets
+(defn calculate-invalid-targets
   [shape-id objects]
   (let [result #{shape-id}
         children (get-in objects [shape-id :shape])
@@ -62,13 +58,13 @@
                     (into result (calculate-invalid-targets child-id objects)))]
     (reduce reduce-fn result children)))
 
-(defn- valid-frame-target
+(defn valid-frame-target
   [shape-id parent-id objects]
   (let [shape (get objects shape-id)]
     (or (not= (:type shape) :frame)
         (= parent-id uuid/zero))))
 
-(defn- insert-at-index
+(defn insert-at-index
   [shapes index ids]
   (let [[before after] (split-at index shapes)
         p? (set ids)]
