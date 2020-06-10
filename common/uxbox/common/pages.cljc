@@ -387,16 +387,24 @@
       (assoc $ :points (geom/shape->points $))
       (assoc $ :selrect (geom/points->selrect (:points $))))))
 
+
+;; Recursivelly regenerate the precalculated data on the specified
+;; object (only parent group objects are realculcated).
+
 (defmethod process-change :reg-obj
   [data {:keys [id]}]
   (let [objects (:objects data)]
     (loop [item (get objects id)
            data data]
-      (if (= :group (:type item))
-        (let [parent-id (:parent-id item)]
-          (recur (get objects parent-id)
-                 (update-in data [:objects (:id item)] regenerate-selrect-and-points objects)))
-        data))))
+      (if (nil? item)
+        data
+        (if (= :group (:type item))
+          (recur
+           (get objects (:parent-id item))
+           (update-in data [:objects (:id item)] regenerate-selrect-and-points objects))
+          (recur
+           (get objects (:parent-id item))
+           data))))))
 
 (defmethod process-change :mov-objects
   [data {:keys [parent-id shapes index] :as change}]
